@@ -19,4 +19,13 @@ jobs:
           set -o pipefail
           xcodebuild -project InsaatSoft.xcodeproj -scheme InsaatSoft \
             -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
-            -configuration Debug CODE_SIGNING_ALLOWED=NO build
+            -configuration Debug CODE_SIGNING_ALLOWED=NO build 2>&1 | tee derleme.log
+      - name: Derleme hatalarını özetle
+        if: failure()
+        run: |
+          # Hatalar iş özetinde ve uyarı notu olarak görünür (günlük indirmeden okunabilsin)
+          grep -E "error:" derleme.log | sed -E 's#^.*/InsaatSoft/##' | sort -u | head -60 > hatalar.txt || true
+          { echo "## Derleme hataları"; echo '```'; cat hatalar.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          i=0
+          while IFS= read -r l && [ $i -lt 9 ]; do echo "::error::$l"; i=$((i+1)); done < hatalar.txt
+          echo "::error::$(head -40 hatalar.txt | sed ':a;N;$!ba;s/\n/%0A/g')"
