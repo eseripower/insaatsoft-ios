@@ -1,0 +1,53 @@
+# Elle çalıştırılır: uygulamayı arşivler, App Store imzasıyla dışa aktarır ve App Store Connect'e (TestFlight) yükler.
+# Gerekli GitHub gizli değerleri (Settings > Secrets and variables > Actions):
+#   APPLE_TEAM_ID      Apple Developer ekip kimliği (10 karakter)
+#   ASC_KEY_ID         App Store Connect API anahtar kimliği
+#   ASC_ISSUER_ID      App Store Connect API "Issuer ID"
+#   ASC_KEY_P8_BASE64  İndirilen AuthKey_XXXX.p8 dosyasının base64 hali  (base64 -i AuthKey_XXXX.p8 | pbcopy)
+name: iOS TestFlight yükleme
+on:
+  workflow_dispatch:
+    inputs:
+      surum:
+        description: "Sürüm numarası (ör. 1.0.0)"
+        required: true
+        default: "1.0.0"
+jobs:
+  yukle:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Xcode 16 seç
+        run: |
+          X=$(ls -d /Applications/Xcode_16*.app | sort -V | tail -1)
+          sudo xcode-select -s "$X"
+      - name: API anahtarını hazırla
+        env:
+          ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+        run: |
+          mkdir -p ~/private_keys
+          echo "$ASC_KEY_P8_BASE64" | base64 --decode > ~/private_keys/AuthKey_${ASC_KEY_ID}.p8
+          plutil -replace teamID -string "${{ secrets.APPLE_TEAM_ID }}" Support/ExportOptions.plist
+      - name: Arşivle
+        run: |
+          set -o pipefail
+          xcodebuild -project InsaatSoft.xcodeproj -scheme InsaatSoft -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath $RUNNER_TEMP/InsaatSoft.xcarchive \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8 \
+            -authenticationKeyID ${{ secrets.ASC_KEY_ID }} \
+            -authenticationKeyIssuerID ${{ secrets.ASC_ISSUER_ID }} \
+            DEVELOPMENT_TEAM=${{ secrets.APPLE_TEAM_ID }} \
+            MARKETING_VERSION=${{ github.event.inputs.surum }} \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }} \
+            archive
+      - name: Dışa aktar ve App Store Connect'e yükle
+        run: |
+          set -o pipefail
+          xcodebuild -exportArchive -archivePath $RUNNER_TEMP/InsaatSoft.xcarchive \
+            -exportOptionsPlist Support/ExportOptions.plist -exportPath $RUNNER_TEMP/cikti \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8 \
+            -authenticationKeyID ${{ secrets.ASC_KEY_ID }} \
+            -authenticationKeyIssuerID ${{ secrets.ASC_ISSUER_ID }}

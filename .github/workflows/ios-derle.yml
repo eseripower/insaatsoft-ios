@@ -1,0 +1,22 @@
+# Her gönderimde uygulamayı imzasız olarak simülatör için derler (Mac'e gerek kalmadan derleme denetimi).
+name: iOS derleme denetimi
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+jobs:
+  derle:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Xcode 16 seç
+        run: |
+          X=$(ls -d /Applications/Xcode_16*.app | sort -V | tail -1)
+          sudo xcode-select -s "$X"
+          xcodebuild -version
+      - name: Derle (iPhone simülatörü)
+        run: |
+          set -o pipefail
+          xcodebuild -project InsaatSoft.xcodeproj -scheme InsaatSoft \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            -configuration Debug CODE_SIGNING_ALLOWED=NO build
