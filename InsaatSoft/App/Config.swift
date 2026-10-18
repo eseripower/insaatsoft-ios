@@ -11,13 +11,14 @@ enum Config {
     /// KavisCloud > Uygulamalar'da iOS uygulaması bu kimlikle (Bundle ID) kayıtlı olmalıdır.
     /// Android uygulaması "com.kavissoft.insaatsoft" kullandığı için iOS ayrı bir kimlik kullanır
     /// (KavisCloud'da paket adı benzersizdir).
-    static var bundleID: String { Bundle.main.bundleIdentifier ?? "com.kavissoft.insaatsoft.ios" }
+    /// Sabittir: uygulama başka bir imzayla (ör. Sideloadly / AltStore, değişen Bundle ID) kurulsa da KavisCloud bu kimlikle tanır.
+    static let bundleID = "com.kavissoft.insaatsoft.ios"
 
     static var appVersion: String { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0" }
     static var buildNumber: String { Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1" }
 
     /// Arka plan yenileme görevi (Info.plist > BGTaskSchedulerPermittedIdentifiers ile aynı olmalı)
-    static var backgroundTaskID: String { bundleID + ".yenile" }
+    static let backgroundTaskID = "com.kavissoft.insaatsoft.ios.yenile"
 
     /// Sunucuya bildirilen cihaz adı (iOS 16+ gerçek cihaz adını vermez; model ve sürüm yazılır)
     static var deviceName: String {

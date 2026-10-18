@@ -1,0 +1,45 @@
+# Elle ya da her etiketle çalışır: imzasız .ipa üretir ve GitHub "Releases" sayfasına koyar.
+# İmzasız .ipa doğrudan iPhone'a kurulamaz; Sideloadly / AltStore gibi bir araç kendi Apple kimliğinizle imzalayıp kurar.
+# App Store / TestFlight dağıtımı için "iOS TestFlight yükleme" iş akışını kullanın.
+name: iOS imzasız IPA
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+jobs:
+  ipa:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Xcode 16 seç
+        run: |
+          X=$(ls -d /Applications/Xcode_16*.app | sort -V | tail -1)
+          sudo xcode-select -s "$X"
+      - name: Cihaz için derle (imzasız)
+        run: |
+          set -o pipefail
+          xcodebuild -project InsaatSoft.xcodeproj -scheme InsaatSoft -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath $RUNNER_TEMP/dd \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build 2>&1 | tee derleme.log | grep -E "error:|BUILD" || true
+          test -d "$RUNNER_TEMP/dd/Build/Products/Release-iphoneos/InsaatSoft.app"
+      - name: IPA paketle
+        run: |
+          SURUM=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$RUNNER_TEMP/dd/Build/Products/Release-iphoneos/InsaatSoft.app/Info.plist")
+          echo "SURUM=$SURUM" >> "$GITHUB_ENV"
+          mkdir -p $RUNNER_TEMP/ipa/Payload
+          cp -R "$RUNNER_TEMP/dd/Build/Products/Release-iphoneos/InsaatSoft.app" $RUNNER_TEMP/ipa/Payload/
+          cd $RUNNER_TEMP/ipa && zip -qry "$GITHUB_WORKSPACE/InsaatSoft-$SURUM-imzasiz.ipa" Payload
+          ls -la "$GITHUB_WORKSPACE"/*.ipa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: InsaatSoft-ipa
+          path: "*.ipa"
+      - name: Releases sayfasına koy
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ETIKET="ios-$SURUM-${GITHUB_RUN_NUMBER}"
+          gh release create "$ETIKET" "InsaatSoft-$SURUM-imzasiz.ipa" --title "İnşaatSoft ERP iOS $SURUM (imzasız IPA)" \
+            --notes "Sideloadly / AltStore ile kendi Apple kimliğinizle imzalayıp kurun. App Store / TestFlight için TestFlight iş akışını kullanın." --target "$GITHUB_SHA"

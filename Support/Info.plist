@@ -36,7 +36,7 @@
 	</array>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
-		<string>$(PRODUCT_BUNDLE_IDENTIFIER).yenile</string>
+		<string>com.kavissoft.insaatsoft.ios.yenile</string>
 	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
