@@ -73,7 +73,7 @@ final class TekDosyaOnizleme: QLPreviewController, QLPreviewControllerDataSource
     required init?(coder: NSCoder) { fatalError("init(coder:) kullanılmaz") }
 
     func numberOfPreviewItems(in controller: QLPreviewController) -> Int { 1 }
-    func previewItem(at index: Int) -> QLPreviewItem { dosya as NSURL }
+    func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem { dosya as NSURL }
 }
 
 // MARK: - İşlem sonucu sayfası (yeni parola, yedek kodlar, takvim bağlantısı, Authenticator anahtarı …)
