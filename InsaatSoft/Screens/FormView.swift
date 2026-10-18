@@ -182,7 +182,7 @@ struct FormView: View {
                                     UINotificationFeedbackGenerator().notificationOccurred(.success)
                                     Toast.shared.goster(j.str("msg") ?? "Kaydedildi.")
                                     NotificationCenter.default.post(name: .veriDegisti, object: nil)
-                                    if let a = Eylem(j["ac"]), let u = a.disAdres { UIApplication.shared.open(u) }
+                                    if let a = Eylem(j["ac"]), let u = a.disAdres { _ = await UIApplication.shared.open(u) }
                                     if j["sonuc"].isObject { sonuc = SonucHedef(j: j["sonuc"]) } else { dismiss() }
                                 }
                             }
