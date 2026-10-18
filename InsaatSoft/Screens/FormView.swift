@@ -21,6 +21,8 @@ struct FormAlani: Identifiable {
     var secenekler: [Secenek] { j["secenekler"].array.map { Secenek(kod: $0["kod"].string, ad: $0["ad"].string) } }
     var altAlanlar: [FormAlani] { j["alt"].array.map { FormAlani(id: $0["ad"].string, j: $0) } }
     var varsayilan: String { j["varsayilan"].string }
+    var cok: Bool { j["cok"].bool }                    // birden çok dosya
+    var onizleme: String? { j.str("onizleme") }        // mevcut görsel
 }
 
 struct Secenek: Hashable { let kod: String; let ad: String }
@@ -39,7 +41,7 @@ final class FormModel: ObservableObject {
     @Published var metin: [String: String] = [:]
     @Published var liste: [String: [String]] = [:]
     @Published var satirlar: [String: [[String: String]]] = [:]
-    @Published var dosya: [String: SecilenDosya] = [:]
+    @Published var dosya: [String: [SecilenDosya]] = [:]
     @Published var etiketAd: [String: String] = [:]       // bağlı alanların seçili kaydının adı
     @Published var eksik: Set<String> = []
     @Published var hata: String?
@@ -98,7 +100,7 @@ final class FormModel: ObservableObject {
         switch a.tip {
         case "bilgi": return true
         case "coklu": return !(liste[a.ad] ?? []).isEmpty
-        case "dosya": return dosya[a.ad] != nil
+        case "dosya": return !(dosya[a.ad] ?? []).isEmpty
         case "onay": return (metin[a.ad] ?? "") == "1"
         case "satirlar":
             let ilk = a.altAlanlar.first?.ad ?? ""
@@ -108,7 +110,8 @@ final class FormModel: ObservableObject {
     }
 
     /// Kaydet: multipart/form-data, alan adları web panelindeki formla aynı (coklu → ad[], satırlar → altalan[])
-    func gonder(kayit: Int) async -> String? {
+    /// Başarılıysa sunucunun yanıtını döndürür (msg, sonuc, ac)
+    func gonder(kayit: Int) async -> JSON? {
         eksik = Set(alanlar.filter { $0.zorunlu && !dolu($0) }.map(\.ad))
         if !eksik.isEmpty {
             let adlar = alanlar.filter { eksik.contains($0.ad) }.map(\.etiket).prefix(3).joined(separator: ", ")
@@ -129,7 +132,7 @@ final class FormModel: ObservableObject {
                 }
                 for s in dolular { for alt in a.altAlanlar { m.add(alt.ad + "[]", s[alt.ad] ?? "") } }
             case "dosya":
-                if let d = dosya[a.ad] { m.addFile(a.ad, filename: d.ad, mime: d.mime, content: d.veri) }
+                for d in dosya[a.ad] ?? [] { m.addFile(a.ad, filename: d.ad, mime: d.mime, content: d.veri) }
             default:
                 m.add(a.ad, metin[a.ad] ?? "")
             }
@@ -139,8 +142,8 @@ final class FormModel: ObservableObject {
         do {
             var q: [(String, String)] = [("id", gonderId)]
             if kayit > 0 { q.append(("kayit", String(kayit))) }
-            let j = try await API.shared.cagir("gonder", sorgu: q, govde: .multipart(m), zamanAsimi: dosya.isEmpty ? 45 : 180)
-            return j.str("msg") ?? "Kaydedildi."
+            let dosyaVar = dosya.values.contains { !$0.isEmpty }
+            return try await API.shared.cagir("gonder", sorgu: q, govde: .multipart(m), zamanAsimi: dosyaVar ? 180 : 45)
         } catch {
             UINotificationFeedbackGenerator().notificationOccurred(.error)
             Toast.shared.goster(error.localizedDescription, hata: true)
@@ -154,6 +157,7 @@ struct FormView: View {
     let kayit: Int
     @StateObject private var vm = FormModel()
     @Environment(\.dismiss) private var dismiss
+    @State private var sonuc: SonucHedef?
 
     var body: some View {
         Group {
@@ -174,11 +178,12 @@ struct FormView: View {
                     Section {
                         Button {
                             Task {
-                                if let m = await vm.gonder(kayit: kayit) {
+                                if let j = await vm.gonder(kayit: kayit) {
                                     UINotificationFeedbackGenerator().notificationOccurred(.success)
-                                    Toast.shared.goster(m)
+                                    Toast.shared.goster(j.str("msg") ?? "Kaydedildi.")
                                     NotificationCenter.default.post(name: .veriDegisti, object: nil)
-                                    dismiss()
+                                    if let a = Eylem(j["ac"]), let u = a.disAdres { UIApplication.shared.open(u) }
+                                    if j["sonuc"].isObject { sonuc = SonucHedef(j: j["sonuc"]) } else { dismiss() }
                                 }
                             }
                         } label: {
@@ -208,6 +213,7 @@ struct FormView: View {
         }
         .task { if vm.tanim.isNull { await vm.yukle(formId, kayit: kayit) } }
         .interactiveDismissDisabled(vm.gonderiliyor)
+        .sheet(item: $sonuc, onDismiss: { dismiss() }) { SonucView(j: $0.j) }
     }
 
     /// Alanlar "grup" başlığı görülen yerden itibaren yeni bölüme ayrılır (web panelindeki gibi)
@@ -297,7 +303,7 @@ struct AlanGirdisi: View {
                 }
             }
         case "dosya":
-            DosyaGirdisi(a: a, etiket: etiket, secilen: Binding(get: { vm.dosya[a.ad] }, set: { vm.dosya[a.ad] = $0; vm.eksik.remove(a.ad) }))
+            DosyaGirdisi(a: a, etiket: etiket, secilen: Binding(get: { vm.dosya[a.ad] ?? [] }, set: { vm.dosya[a.ad] = $0; vm.eksik.remove(a.ad) }))
         case "satirlar":
             SatirlarGirdisi(a: a, vm: vm)
         default:
@@ -515,17 +521,29 @@ extension Array {
 struct DosyaGirdisi: View {
     let a: FormAlani
     let etiket: String
-    @Binding var secilen: SecilenDosya?
-    @State private var fotoSecim: PhotosPickerItem?
+    @Binding var secilen: [SecilenDosya]
+    @State private var fotoSecim: [PhotosPickerItem] = []
     @State private var kamera = false
     @State private var dosyaSec = false
 
-    private var pdfOlur: Bool { a.kabul.isEmpty || a.kabul.contains("pdf") }
+    /// Kabul edilen türler: "image/*" yalnızca görsel; "pdf" içeriyorsa görsel + PDF; boşsa her dosya
+    private var yalnizGorsel: Bool { a.kabul.hasPrefix("image") && !a.kabul.contains("pdf") }
+    private var dosyaTurleri: [UTType] {
+        if yalnizGorsel { return [.image] }
+        if a.kabul.contains("pdf") && !a.kabul.contains("*/*") { return [.pdf, .image] }
+        return [.item]
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(etiket)
-            if let s = secilen {
+            if let o = a.onizleme, secilen.isEmpty {
+                HStack(spacing: 10) {
+                    YetkiliResim(adres: o).frame(width: 56, height: 56).background(Color(.tertiarySystemFill)).clipShape(RoundedRectangle(cornerRadius: 8))
+                    Text("Mevcut görsel").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            ForEach(Array(secilen.enumerated()), id: \.offset) { i, s in
                 HStack(spacing: 10) {
                     if let r = s.onizleme {
                         Image(uiImage: r).resizable().scaledToFill().frame(width: 56, height: 56).clipShape(RoundedRectangle(cornerRadius: 8))
@@ -537,15 +555,15 @@ struct DosyaGirdisi: View {
                         Text(ByteCountFormatter.string(fromByteCount: Int64(s.veri.count), countStyle: .file)).font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Button(role: .destructive) { secilen = nil } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.borderless)
+                    Button(role: .destructive) { if secilen.indices.contains(i) { secilen.remove(at: i) } } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.borderless)
                 }
             }
             HStack(spacing: 10) {
                 if UIImagePickerController.isSourceTypeAvailable(.camera) {
                     Button { kamera = true } label: { Label("Çek", systemImage: "camera.fill") }.buttonStyle(.bordered)
                 }
-                PhotosPicker(selection: $fotoSecim, matching: .images) { Label("Galeri", systemImage: "photo") }.buttonStyle(.bordered)
-                if pdfOlur {
+                PhotosPicker(selection: $fotoSecim, maxSelectionCount: a.cok ? 20 : 1, matching: .images) { Label("Galeri", systemImage: "photo") }.buttonStyle(.bordered)
+                if !yalnizGorsel {
                     Button { dosyaSec = true } label: { Label("Dosya", systemImage: "doc") }.buttonStyle(.bordered)
                 }
             }
@@ -554,27 +572,43 @@ struct DosyaGirdisi: View {
         }
         .padding(.vertical, 4)
         .onChange(of: fotoSecim) { yeni in
-            guard let yeni else { return }
+            guard !yeni.isEmpty else { return }
             Task {
-                if let d = try? await yeni.loadTransferable(type: Data.self), let r = UIImage(data: d) { secilen = DosyaGirdisi.jpeg(r) }
-                fotoSecim = nil
+                var eklenen: [SecilenDosya] = []
+                for oge in yeni {
+                    if let d = try? await oge.loadTransferable(type: Data.self), let r = UIImage(data: d), let j = DosyaGirdisi.jpeg(r) { eklenen.append(j) }
+                }
+                ekle(eklenen)
+                fotoSecim = []
             }
         }
         .sheet(isPresented: $kamera) {
-            KameraView { r in secilen = DosyaGirdisi.jpeg(r) }.ignoresSafeArea()
+            KameraView { r in if let j = DosyaGirdisi.jpeg(r) { ekle([j]) } }.ignoresSafeArea()
         }
-        .fileImporter(isPresented: $dosyaSec, allowedContentTypes: pdfOlur ? [.pdf, .image] : [.image]) { sonuc in
-            guard case .success(let u) = sonuc else { return }
-            let erisim = u.startAccessingSecurityScopedResource()
-            defer { if erisim { u.stopAccessingSecurityScopedResource() } }
-            guard let d = try? Data(contentsOf: u) else { Toast.shared.goster("Dosya okunamadı.", hata: true); return }
-            if d.count > 15 * 1024 * 1024 { Toast.shared.goster("Dosya en fazla 15 MB olabilir.", hata: true); return }
-            if u.pathExtension.lowercased() == "pdf" {
-                secilen = SecilenDosya(ad: DosyaGirdisi.guvenliAd(u.lastPathComponent), mime: "application/pdf", veri: d, onizleme: nil)
-            } else if let r = UIImage(data: d) {
-                secilen = DosyaGirdisi.jpeg(r)
+        .fileImporter(isPresented: $dosyaSec, allowedContentTypes: dosyaTurleri, allowsMultipleSelection: a.cok) { sonuc in
+            guard case .success(let adresler) = sonuc else { return }
+            var eklenen: [SecilenDosya] = []
+            for u in adresler {
+                let erisim = u.startAccessingSecurityScopedResource()
+                defer { if erisim { u.stopAccessingSecurityScopedResource() } }
+                guard let d = try? Data(contentsOf: u) else { Toast.shared.goster("Dosya okunamadı.", hata: true); continue }
+                if d.count > 15 * 1024 * 1024 { Toast.shared.goster("Dosya en fazla 15 MB olabilir: \(u.lastPathComponent)", hata: true); continue }
+                let uzanti = u.pathExtension.lowercased()
+                let tur = UTType(filenameExtension: uzanti)
+                if tur?.conforms(to: .image) == true, uzanti != "gif", uzanti != "svg", let r = UIImage(data: d), let j = DosyaGirdisi.jpeg(r) {
+                    eklenen.append(j)
+                } else {
+                    let mime = uzanti == "pdf" ? "application/pdf" : (tur?.preferredMIMEType ?? "application/octet-stream")
+                    eklenen.append(SecilenDosya(ad: DosyaGirdisi.guvenliAd(u.lastPathComponent), mime: mime, veri: d, onizleme: nil))
+                }
             }
+            ekle(eklenen)
         }
+    }
+
+    private func ekle(_ yeni: [SecilenDosya]) {
+        guard !yeni.isEmpty else { return }
+        if a.cok { secilen += yeni } else { secilen = [yeni[yeni.count - 1]] }
     }
 
     /// Fotoğraf en fazla 2560 px'e küçültülür ve JPEG'e çevrilir (yön düzeltilir, konum bilgisi taşınmaz)

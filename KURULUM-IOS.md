@@ -77,7 +77,7 @@ KavisCloud › **Uygulamalar › Yeni uygulama**:
 | Sistem | iOS (iPhone) |
 | Paket adı (Bundle ID) | `com.kavissoft.insaatsoft.ios` |
 | Program | insaatsoft |
-| Sürüm | 1.0.0 |
+| Sürüm | 1.1.0 |
 | App Store adresi | `https://apps.apple.com/tr/app/...` (yayına girince) |
 
 - Uygulama Firma No ile firma ararken bu kaydı kullanır. Kayıt yoksa ya da durumu pasifse "Uygulama tanınmadı / kullanıma kapalı" yanıtı döner.
@@ -92,6 +92,19 @@ KavisCloud › **Uygulamalar › Yeni uygulama**:
 3. E-posta ve parola ile girin. Bu telefondan ilk girişte Google Authenticator kodu istenir. Hesapta Authenticator kurulu değilse ve yönetici izin verdiyse kurulum uygulama içinden yapılır; gösterilen yedek kodlar güvenli bir yere kaydedilmelidir.
 4. Girişten sonra "Face ID ile giriş açılsın mı?" sorusuna **Aç** denirse sonraki girişler Face ID ile yapılır.
 5. Bildirim izni verilmelidir (Ayarlar › İnşaatSoft › Bildirimler).
+
+## Web paneliyle eşitlik (uygulama 1.1.0 + İnşaatSoft 1.2.3)
+
+Uygulama 1.1.0, web panelinde yapılabilen işlemlerin tamamını telefondan yapar. Bunun için sunucuda **İnşaatSoft 1.2.3** kurulu olmalıdır (KavisCloud › Paketi Yükle ile dağıtılır). Eski sunucu sürümlerinde uygulama çalışmaya devam eder, yalnızca yeni ekranlar görünmez.
+
+- **Toplu işlem:** listelerde sağ üstteki **Seç** ile kayıtlar işaretlenir; alttaki **İşlemler** menüsünden okundu / sil / hatırlatma gönder / aktif-pasif gibi işlemler seçilenlere uygulanır.
+- **Süzgeçler:** seçim, tarih (takvimden) ve bağlı kayıt (proje, müşteri …) süzgeçleri; liste, detay, panel ve rapor ekranlarında.
+- **Dosyalar:** belgeler, CSV dışa aktarma, raporlar, e-belge XML'i ve yedekler uygulama içinde açılır; sağ üstteki paylaş düğmesiyle **Dosyalar'a kaydet, yazdır, e-posta, AirDrop**. Bağlantılar 15 dakika geçerlidir ve kullanıcıya özeldir.
+- **Formlar:** çoklu görsel yükleme, her türlü dosya (yetkili alanlarda), mevcut görselin önizlemesi ve kaldırılması.
+- **İşlem sonuçları:** yeni portal parolası, Authenticator anahtarı, yedek kodlar, takvim bağlantısı gibi bir kez gösterilen bilgiler ayrı sayfada açılır; **Kopyala** ve **Takvime / Authenticator'a ekle** düğmeleriyle.
+- **Genel arama:** Menü › büyüteç; proje, müşteri, daire, sözleşme no, telefon ile tüm kayıtlarda arama.
+- **Yönetim:** kullanıcılar (tüm alanlar, ana yönetici yetkisi), giriş güvenliği, işlem kayıtları, genel ayarlar, web sitesi tasarımı (tüm sekmeler ve görseller), e-belge ve online ödeme ayarları, SMS / WhatsApp / e-posta ayarları, sunucu ve yedekleme (ana yönetici: yedek al, indir, geri yükle).
+- Web panelinde kalanlar (güvenlik ve dosya boyutu nedeniyle): başka sistemden veri aktarımı, bulut yedek hesaplarının bağlanması, mali mühür yükleme.
 
 ## Güvenlik
 

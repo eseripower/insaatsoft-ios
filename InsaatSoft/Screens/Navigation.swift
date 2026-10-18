@@ -51,26 +51,61 @@ struct SayfaKabi: View {
 final class EylemModel: ObservableObject {
     @Published var onayBekleyen: Eylem?
     @Published var calisiyor = false
+    @Published var sonuc: SonucHedef?
+    /// Onay bekleyen toplu işlemin seçili kayıtları
+    private var bekleyenIdler: [String] = []
     /// İşlem başarılı olunca (ör. silmeden sonra geri dönmek için)
     var bitti: ((Eylem) -> Void)?
 
-    func yurut(_ e: Eylem, nav: NavYolu) {
+    func yurut(_ e: Eylem, nav: NavYolu, idler: [String] = []) {
+        if let k = e.kopya { Paylasim.kopyala(k); return }
+        if let p = e.paylas { Paylasim.metinPaylas(p, dosyaAdi: e.dosyaAdi); return }
         if let r = e.route { nav.git(r); return }
+        if let u = e.indirme { Task { await indir(u) }; return }
         if let u = e.disAdres { UIApplication.shared.open(u); return }
         guard e.istek != nil else { return }
-        if e.onay != nil { onayBekleyen = e } else { Task { await istek(e) } }
+        if e.onay != nil { bekleyenIdler = idler; onayBekleyen = e } else { Task { await istek(e, idler: idler) } }
     }
 
-    func istek(_ e: Eylem) async {
+    func onaylandi(_ e: Eylem) {
+        let idler = bekleyenIdler
+        bekleyenIdler = []
+        Task { await istek(e, idler: idler) }
+    }
+
+    func istek(_ e: Eylem, idler: [String] = []) async {
         guard let id = e.istek, !calisiyor else { return }
         calisiyor = true
         defer { calisiyor = false }
         do {
-            let j = try await API.shared.cagir("eylem", sorgu: [("id", id)], govde: .form([]))
+            let j = try await API.shared.cagir("eylem", sorgu: [("id", id)], govde: .form(idler.map { ("ids[]", $0) }))
             Toast.shared.goster(j.str("msg") ?? "İşlem tamamlandı.")
             UINotificationFeedbackGenerator().notificationOccurred(.success)
+            yanitIsle(j)
             bitti?(e)
             NotificationCenter.default.post(name: .veriDegisti, object: nil)
+        } catch {
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
+            Toast.shared.goster(error.localizedDescription, hata: true)
+        }
+    }
+
+    /// Yanıttaki ek talimatlar: "sonuc" (gösterilecek bilgi sayfası), "ac" (açılacak adres / dosya)
+    func yanitIsle(_ j: JSON) {
+        if j["sonuc"].isObject { sonuc = SonucHedef(j: j["sonuc"]) }
+        if let a = Eylem(j["ac"]) {
+            if let u = a.indirme { Task { await indir(u) } } else if let u = a.disAdres { UIApplication.shared.open(u) }
+        }
+    }
+
+    /// İmzalı adresteki dosyayı indirip uygulama içinde açar
+    func indir(_ u: URL) async {
+        guard !calisiyor else { return }
+        calisiyor = true
+        defer { calisiyor = false }
+        do {
+            let yerel = try await API.shared.indir(u)
+            Paylasim.onizle(yerel)
         } catch {
             UINotificationFeedbackGenerator().notificationOccurred(.error)
             Toast.shared.goster(error.localizedDescription, hata: true)
@@ -86,11 +121,12 @@ struct EylemKatmani: ViewModifier {
             .environmentObject(model)
             .alert(model.onayBekleyen?.etiket ?? "Onay", isPresented: Binding(get: { model.onayBekleyen != nil }, set: { if !$0 { model.onayBekleyen = nil } }),
                    presenting: model.onayBekleyen) { e in
-                Button(e.etiket.isEmpty ? "Onayla" : e.etiket, role: e.silme ? .destructive : nil) { Task { await model.istek(e) } }
+                Button(e.etiket.isEmpty ? "Onayla" : e.etiket, role: e.silme ? .destructive : nil) { model.onaylandi(e) }
                 Button("Vazgeç", role: .cancel) {}
             } message: { e in
                 Text(e.onay ?? "")
             }
+            .sheet(item: $model.sonuc) { SonucView(j: $0.j) }
             .overlay {
                 if model.calisiyor {
                     ProgressView().controlSize(.large).padding(24)
@@ -158,7 +194,7 @@ struct KalemHucre: View {
         Group {
             if let r = k.ac?.route {
                 NavigationLink(value: r) { KalemSatiri(k: k) }
-            } else if let a = k.ac, a.disAdres != nil || a.istek != nil {
+            } else if let a = k.ac {
                 Button { model.yurut(a, nav: nav) } label: { KalemSatiri(k: k) }.buttonStyle(.plain)
             } else {
                 KalemSatiri(k: k)

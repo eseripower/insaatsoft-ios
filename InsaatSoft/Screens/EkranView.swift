@@ -15,9 +15,13 @@ final class EkranModel: ObservableObject {
     @Published var dahaYukleniyor = false
     @Published var ara = ""
     @Published var suzgec: [String: String] = [:]
+    @Published var suzgecAd: [String: String] = [:]     // bağlı süzgeçlerde seçili kaydın adı
+    @Published var secimModu = false                    // toplu işlem seçimi
+    @Published var secili: Set<String> = []
     private var istekNo = 0
 
     var tur: String { veri["tur"].string }
+    var toplu: [Eylem] { Eylem.liste(veri["toplu"]) }
 
     private func sorgu(_ id: String, sayfa: Int) -> [(String, String)] {
         var q: [(String, String)] = [("id", id)]
@@ -39,6 +43,9 @@ final class EkranModel: ObservableObject {
             kalemler = Kalem.liste(j["kayitlar"])
             sayfa = max(1, j["sayfa"].int)
             sayfaSayisi = max(1, j["sayfa_sayisi"].int)
+            let mevcut = Set(kalemler.map(\.sunucuId))
+            secili = secili.intersection(mevcut)
+            if j["toplu"].array.isEmpty { secimModu = false }
         } catch {
             guard no == istekNo else { return }
             if veri.isNull { hata = error.localizedDescription } else if hataGoster, (error as? APIError)?.kod != "iptal" { Toast.shared.goster(error.localizedDescription, hata: true) }
@@ -56,6 +63,10 @@ final class EkranModel: ObservableObject {
         kalemler += j["kayitlar"].array.enumerated().map { Kalem($0.element, sira: baslangic + $0.offset) }
         sayfa = max(sayfa + 1, j["sayfa"].int)
         sayfaSayisi = max(1, j["sayfa_sayisi"].int)
+    }
+
+    func suzgecDegisti(_ id: String) {
+        Task { await yukle(id, sessiz: true) }
     }
 }
 
@@ -75,19 +86,40 @@ struct EkranView: View {
             } else {
                 switch vm.tur {
                 case "liste": ListeGovde(vm: vm, id: id)
-                case "panel": PanelGovde(j: vm.veri)
-                case "tablo": TabloGovde(j: vm.veri)
-                default: DetayGovde(j: vm.veri)
+                case "panel": PanelGovde(j: vm.veri, vm: vm, ekranId: id)
+                case "tablo": TabloGovde(j: vm.veri, vm: vm, ekranId: id)
+                default: DetayGovde(j: vm.veri, vm: vm, ekranId: id)
                 }
             }
         }
         .navigationTitle(vm.veri.str("baslik") ?? "")
         .navigationBarTitleDisplayMode(kok ? .large : .inline)
-        .toolbar { EylemAracCubugu(eylemler: vm.tur == "detay" || vm.tur == "panel" ? [] : Eylem.liste(vm.veri["eylemler"]), model: eylem, nav: nav) }
+        .toolbar {
+            if vm.secimModu {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Bitti") { vm.secimModu = false; vm.secili = [] }
+                }
+                TopluAracCubugu(vm: vm, model: eylem, nav: nav)
+            } else {
+                EylemAracCubugu(eylemler: vm.tur == "detay" || vm.tur == "panel" ? [] : Eylem.liste(vm.veri["eylemler"]), model: eylem, nav: nav)
+                if vm.tur == "liste", !vm.toplu.isEmpty, !vm.kalemler.isEmpty {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button("Seç") { vm.secili = []; vm.secimModu = true }
+                    }
+                }
+            }
+        }
+        .environment(\.editMode, .constant(vm.secimModu ? .active : .inactive))
         .eylemKatmani(eylem)
         .task { if vm.veri.isNull { await vm.yukle(id) } }
         .onReceive(NotificationCenter.default.publisher(for: .veriDegisti)) { _ in Task { await vm.yukle(id, sessiz: true, hataGoster: false) } }
-        .onAppear { eylem.bitti = { e in if e.geri { dismiss() } } }
+        .onAppear {
+            let m = vm
+            eylem.bitti = { [weak m] e in
+                if e.geri { dismiss() }
+                if m?.secimModu == true { m?.secimModu = false; m?.secili = [] }
+            }
+        }
         .modifier(AramaDestegi(etkin: vm.tur == "liste" && vm.veri["ara"].bool, ipucu: vm.veri.str("ara_ipucu") ?? "Ara", metin: $vm.ara) {
             aramaGorevi?.cancel()
             aramaGorevi = Task {
@@ -95,6 +127,37 @@ struct EkranView: View {
                 if !Task.isCancelled { await vm.yukle(id, sessiz: true) }
             }
         })
+    }
+}
+
+/// Toplu işlem çubuğu: tümünü seç, seçili sayısı ve işlemler (alt çubukta)
+private struct TopluAracCubugu: ToolbarContent {
+    let vm: EkranModel   // EkranView gözlemler; değişince çubuk yeniden kurulur
+    let model: EylemModel
+    let nav: NavYolu
+
+    var body: some ToolbarContent {
+        ToolbarItemGroup(placement: .bottomBar) {
+            let tumu = vm.kalemler.map(\.sunucuId).filter { !$0.isEmpty }
+            Button(vm.secili.count == tumu.count && !tumu.isEmpty ? "Hiçbiri" : "Tümünü seç") {
+                vm.secili = vm.secili.count == tumu.count ? [] : Set(tumu)
+            }
+            Spacer()
+            Text(vm.secili.isEmpty ? "Kayıt seçin" : "\(vm.secili.count) seçili").font(.subheadline).foregroundStyle(.secondary)
+            Spacer()
+            Menu {
+                ForEach(vm.toplu) { e in
+                    Button(role: e.silme ? .destructive : nil) {
+                        model.yurut(e, nav: nav, idler: vm.secili.filter { !$0.isEmpty }.sorted())
+                    } label: {
+                        Label(e.etiket, systemImage: e.ikon.isEmpty ? (e.silme ? "trash" : "checkmark.circle") : Simge.ad(e.ikon))
+                    }
+                }
+            } label: {
+                Text("İşlemler").fontWeight(.semibold)
+            }
+            .disabled(vm.secili.isEmpty)
+        }
     }
 }
 
@@ -124,34 +187,26 @@ private struct ListeGovde: View {
 
     var body: some View {
         let j = vm.veri
-        List {
+        List(selection: $vm.secili) {
             if let a = j.str("alt_baslik") {
                 Text(a).font(.subheadline).foregroundStyle(.secondary).listRowBackground(Color.clear).listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+            }
+            if let o = j.str("ozet") {
+                Text(o).font(.subheadline.weight(.semibold)).foregroundStyle(Tema.altin).listRowBackground(Color.clear).listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+            }
+            ForEach(Array(j["uyarilar"].array.enumerated()), id: \.offset) { _, u in
+                Uyari(metin: u["metin"].string, renk: u["renk"].string).listRowBackground(Color.clear).listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
             }
             let kartlar = j["kartlar"].array
             if !kartlar.isEmpty {
                 KartSeridi(kartlar: kartlar).listRowBackground(Color.clear).listRowInsets(EdgeInsets())
             }
-            let suz = j["suzgecler"].array
-            if !suz.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(Array(suz.enumerated()), id: \.offset) { _, s in
-                            SuzgecMenusu(s: s, deger: vm.suzgec[s["ad"].string] ?? s["deger"].string) { yeni in
-                                vm.suzgec[s["ad"].string] = yeni
-                                Task { await vm.yukle(id, sessiz: true) }
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                }
-                .listRowBackground(Color.clear).listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
-            }
+            SuzgecSeridi(vm: vm, id: id)
             Section {
                 if vm.kalemler.isEmpty {
                     BosView(mesaj: j.str("bos") ?? "Kayıt yok.").listRowBackground(Color.clear)
                 } else {
-                    ForEach(vm.kalemler) { k in KalemHucre(k: k) }
+                    ForEach(vm.kalemler) { k in KalemHucre(k: k).tag(k.sunucuId) }
                     if vm.sayfa < vm.sayfaSayisi {
                         HStack { Spacer(); ProgressView(); Spacer() }
                             .onAppear { Task { await vm.devam(id) } }
@@ -160,6 +215,8 @@ private struct ListeGovde: View {
                 }
             } header: {
                 if j["toplam"].int > 0 { Text("\(j["toplam"].int) kayıt") }
+            } footer: {
+                if let n = j.str("not") { Text(n) }
             }
         }
         .listStyle(.insetGrouped)
@@ -183,31 +240,130 @@ struct KartSeridi: View {
     }
 }
 
-private struct SuzgecMenusu: View {
-    let s: JSON
-    let deger: String
-    let sec: (String) -> Void
+/// Süzgeç çipleri (seçim, tarih, bağlı kayıt). Liste, detay ve panel ekranlarında listenin bir satırı olarak.
+struct SuzgecSeridi: View {
+    @ObservedObject var vm: EkranModel
+    let id: String
 
     var body: some View {
-        let secenekler = s["secenekler"].array
-        let secili = secenekler.first { $0["kod"].string == deger }
-        Menu {
-            Button { sec("") } label: { if deger.isEmpty { Label(s.str("bos") ?? "Tümü", systemImage: "checkmark") } else { Text(s.str("bos") ?? "Tümü") } }
-            ForEach(Array(secenekler.enumerated()), id: \.offset) { _, o in
-                Button { sec(o["kod"].string) } label: {
-                    if o["kod"].string == deger { Label(o["ad"].string, systemImage: "checkmark") } else { Text(o["ad"].string) }
+        let suz = vm.veri["suzgecler"].array
+        if !suz.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(Array(suz.enumerated()), id: \.offset) { _, s in
+                        let ad = s["ad"].string
+                        SuzgecCipi(s: s, deger: vm.suzgec[ad] ?? s["deger"].string, degerAd: vm.suzgecAd[ad] ?? s["deger_ad"].string) { yeni, yeniAd in
+                            vm.suzgec[ad] = yeni
+                            vm.suzgecAd[ad] = yeniAd
+                            vm.suzgecDegisti(id)
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+            .listRowBackground(Color.clear).listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+        }
+    }
+}
+
+private struct SuzgecCipi: View {
+    let s: JSON
+    let deger: String
+    let degerAd: String
+    let sec: (String, String) -> Void
+    @State private var tarihAcik = false
+    @State private var bagliAcik = false
+
+    private var bos: String { s.str("bos") ?? s["etiket"].string }
+
+    var body: some View {
+        switch s["tip"].string {
+        case "tarih":
+            Button { tarihAcik = true } label: { cip(deger.isEmpty ? s["etiket"].string : s["etiket"].string + ": " + TarihSuzgecSayfasi.goster(deger)) }
+                .buttonStyle(.plain)
+                .sheet(isPresented: $tarihAcik) {
+                    TarihSuzgecSayfasi(baslik: s["etiket"].string, deger: deger) { sec($0, "") }
+                        .presentationDetents([.medium, .large])
+                }
+        case "bagli":
+            Button { bagliAcik = true } label: { cip(deger.isEmpty ? bos : (degerAd.isEmpty ? "#" + deger : degerAd)) }
+                .buttonStyle(.plain)
+                .sheet(isPresented: $bagliAcik) {
+                    NavigationStack {
+                        SecenekView(baslik: s["etiket"].string, kaynak: s["kaynak"].string, ust: s["ust"].string, secili: deger) { kod, ad in sec(kod, ad) }
+                            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Kapat") { bagliAcik = false } } }
+                    }
+                }
+        default:
+            let secenekler = s["secenekler"].array
+            let secili = secenekler.first { $0["kod"].string == deger }
+            Menu {
+                Button { sec("", "") } label: { if deger.isEmpty { Label(s.str("bos") ?? "Tümü", systemImage: "checkmark") } else { Text(s.str("bos") ?? "Tümü") } }
+                ForEach(Array(secenekler.enumerated()), id: \.offset) { _, o in
+                    Button { sec(o["kod"].string, o["ad"].string) } label: {
+                        if o["kod"].string == deger { Label(o["ad"].string, systemImage: "checkmark") } else { Text(o["ad"].string) }
+                    }
+                }
+            } label: {
+                cip(secili?["ad"].string ?? bos)
+            }
+        }
+    }
+
+    private func cip(_ metin: String) -> some View {
+        HStack(spacing: 4) {
+            Text(metin).lineLimit(1)
+            Image(systemName: "chevron.down").font(.caption2.weight(.bold))
+        }
+        .font(.subheadline.weight(.medium))
+        .padding(.horizontal, 12).padding(.vertical, 7)
+        .foregroundStyle(deger.isEmpty ? Color.primary : Color.white)
+        .background(deger.isEmpty ? Color(.secondarySystemGroupedBackground) : Tema.altin, in: Capsule())
+    }
+}
+
+/// Tarih süzgeci: takvimden gün seçimi, temizle
+private struct TarihSuzgecSayfasi: View {
+    let baslik: String
+    let deger: String
+    let sec: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var tarih = Date()
+
+    static let bicim: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.calendar = Calendar(identifier: .gregorian)
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
+    static func goster(_ s: String) -> String {
+        guard let d = bicim.date(from: String(s.prefix(10))) else { return s }
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "tr_TR")
+        f.dateFormat = "d MMM yyyy"
+        return f.string(from: d)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                DatePicker(baslik, selection: $tarih, displayedComponents: .date)
+                    .datePickerStyle(.graphical)
+                    .environment(\.locale, Locale(identifier: "tr_TR"))
+                if !deger.isEmpty {
+                    Button("Süzgeci kaldır", role: .destructive) { sec(""); dismiss() }
                 }
             }
-        } label: {
-            HStack(spacing: 4) {
-                Text(secili?["ad"].string ?? (s.str("bos") ?? s["etiket"].string)).lineLimit(1)
-                Image(systemName: "chevron.down").font(.caption2.weight(.bold))
+            .navigationTitle(baslik)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Vazgeç") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button("Uygula") { sec(TarihSuzgecSayfasi.bicim.string(from: tarih)); dismiss() }.fontWeight(.semibold) }
             }
-            .font(.subheadline.weight(.medium))
-            .padding(.horizontal, 12).padding(.vertical, 7)
-            .foregroundStyle(deger.isEmpty ? Color.primary : Color.white)
-            .background(deger.isEmpty ? Color(.secondarySystemGroupedBackground) : Tema.altin, in: Capsule())
         }
+        .onAppear { if let d = TarihSuzgecSayfasi.bicim.date(from: String(deger.prefix(10))) { tarih = d } }
     }
 }
 
@@ -215,6 +371,8 @@ private struct SuzgecMenusu: View {
 
 struct DetayGovde: View {
     let j: JSON
+    var vm: EkranModel? = nil
+    var ekranId = ""
     @EnvironmentObject private var nav: NavYolu
     @State private var buyukResim: GaleriOgesi?
 
@@ -233,9 +391,11 @@ struct DetayGovde: View {
                 }
                 .listRowBackground(Color.clear).listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
             }
+            if let vm { SuzgecSeridi(vm: vm, id: ekranId) }
             BolumListesi(bolumler: j["bolumler"].array, buyukResim: $buyukResim)
         }
         .listStyle(.insetGrouped)
+        .refreshable { if let vm { await vm.yukle(ekranId, sessiz: true) } }
         .fullScreenCover(item: $buyukResim) { GaleriGorunumu(oge: $0) }
     }
 }
@@ -253,8 +413,20 @@ struct BolumListesi: View {
                 let alanlar = b["alanlar"].array
                 let ogeler = Kalem.liste(b["ogeler"])
                 let galeri = b["galeri"].array.map { GaleriOgesi(etiket: $0["etiket"].string, buyuk: $0["buyuk"].string, kucuk: $0["kucuk"].string) }
+                let bEylem = Eylem.liste(b["eylemler"])
+                let tablo = b["tablo"]
                 ForEach(Array(alanlar.enumerated()), id: \.offset) { _, a in AlanSatiri(a: a) }
                 ForEach(ogeler) { KalemHucre(k: $0) }
+                if tablo.isObject {
+                    TabloIzgara(sutunlar: tablo["sutunlar"].stringArray, satirlar: tablo["satirlar"].array.map { $0.array.map { $0.string } })
+                        .padding(.vertical, 4)
+                }
+                if !bEylem.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) { ForEach(bEylem) { EylemCipi(e: $0) } }
+                    }
+                    .padding(.vertical, 2)
+                }
                 if !galeri.isEmpty {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 8)], spacing: 8) {
                         ForEach(galeri) { g in
@@ -267,7 +439,7 @@ struct BolumListesi: View {
                     }
                     .padding(.vertical, 6)
                 }
-                if alanlar.isEmpty, ogeler.isEmpty, galeri.isEmpty, let bos = b.str("bos") {
+                if alanlar.isEmpty, ogeler.isEmpty, galeri.isEmpty, !tablo.isObject, let bos = b.str("bos") {
                     Text(bos).foregroundStyle(.secondary)
                 }
                 if let r = Eylem(b["tumu"])?.route {
@@ -275,6 +447,8 @@ struct BolumListesi: View {
                 }
             } header: {
                 if let t = b.str("baslik") { Text(t) }
+            } footer: {
+                if let n = b.str("not") { Text(n) }
             }
         }
     }
@@ -347,6 +521,8 @@ struct GaleriGorunumu: View {
 
 struct PanelGovde: View {
     let j: JSON
+    var vm: EkranModel? = nil
+    var ekranId = ""
     @EnvironmentObject private var nav: NavYolu
     @State private var buyukResim: GaleriOgesi?
 
@@ -374,12 +550,14 @@ struct PanelGovde: View {
                 }
                 .listRowBackground(Color.clear).listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
             }
+            if let vm { SuzgecSeridi(vm: vm, id: ekranId) }
             ForEach(Array(j["grafikler"].array.enumerated()), id: \.offset) { _, g in
                 Section(g["baslik"].string) { Grafik(g: g).padding(.vertical, 6) }
             }
             BolumListesi(bolumler: j["bolumler"].array, buyukResim: $buyukResim)
         }
         .listStyle(.insetGrouped)
+        .refreshable { if let vm { await vm.yukle(ekranId, sessiz: true) } }
         .fullScreenCover(item: $buyukResim) { GaleriGorunumu(oge: $0) }
     }
 }
@@ -424,10 +602,13 @@ struct Grafik: View {
 
 struct TabloGovde: View {
     let j: JSON
+    var vm: EkranModel? = nil
+    var ekranId = ""
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 if let a = j.str("alt_baslik") { Text(a).font(.subheadline).foregroundStyle(.secondary).padding(.horizontal, 4) }
+                if let vm, !j["suzgecler"].array.isEmpty { SuzgecSeridi(vm: vm, id: ekranId).padding(.horizontal, -16) }
                 ForEach(Array(j["tablolar"].array.enumerated()), id: \.offset) { _, t in
                     VStack(alignment: .leading, spacing: 12) {
                         if let b = t.str("baslik") { Text(b).font(.headline) }
@@ -440,6 +621,7 @@ struct TabloGovde: View {
             .padding(16)
         }
         .background(Color(.systemGroupedBackground))
+        .refreshable { if let vm { await vm.yukle(ekranId, sessiz: true) } }
     }
 }
 

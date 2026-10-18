@@ -33,7 +33,8 @@ final class Router: ObservableObject {
 }
 
 /// Sunucunun ekran tanımlarındaki dokunma hedefi / işlem düğmesi:
-/// {etiket, ikon, renk, ekran | form(+kayit) | istek(+onay, geri) | tel | wa | url | eposta}
+/// {etiket, ikon, renk, ekran | form(+kayit) | istek(+onay, geri) | tel | wa | url | eposta | kopya | paylas(+dosya_adi)}
+/// "url" sunucunun imzalı indirme adresiyse (r=indir) dosya uygulama içinde açılır (önizleme, paylaş, yazdır).
 struct Eylem: Identifiable {
     let id = UUID()
     let etiket: String
@@ -49,6 +50,9 @@ struct Eylem: Identifiable {
     let wa: String?
     let url: String?
     let eposta: String?
+    let kopya: String?
+    let paylas: String?
+    let dosyaAdi: String
 
     init?(_ j: JSON) {
         guard j.isObject else { return nil }
@@ -65,7 +69,10 @@ struct Eylem: Identifiable {
         wa = j.str("wa")
         url = j.str("url")
         eposta = j.str("eposta")
-        if ekran == nil, form == nil, istek == nil, tel == nil, wa == nil, url == nil, eposta == nil { return nil }
+        kopya = j.str("kopya")
+        paylas = j.str("paylas")
+        dosyaAdi = j.str("dosya_adi") ?? "dosya.txt"
+        if ekran == nil, form == nil, istek == nil, tel == nil, wa == nil, url == nil, eposta == nil, kopya == nil, paylas == nil { return nil }
     }
 
     static func liste(_ j: JSON) -> [Eylem] { j.array.compactMap { Eylem($0) } }
@@ -74,6 +81,12 @@ struct Eylem: Identifiable {
         if let f = form { return .form(f, kayit: kayit) }
         if let e = ekran { return .ekran(e) }
         return nil
+    }
+
+    /// Sunucunun imzalı indirme adresi (dosya, CSV, e-belge XML, yedek): uygulama içinde indirilip önizlenir
+    var indirme: URL? {
+        guard let u = url, u.contains("r=indir"), u.hasPrefix("http"), let adres = API.shared.mutlak(u) else { return nil }
+        return adres
     }
 
     var disAdres: URL? {

@@ -30,6 +30,9 @@ struct Kalem: Identifiable {
     }
 
     static func liste(_ j: JSON) -> [Kalem] { j.array.enumerated().map { Kalem($0.element, sira: $0.offset) } }
+
+    /// Sunucudaki kayıt numarası (toplu işlemlerde gönderilir)
+    var sunucuId: String { j["id"].string }
 }
 
 struct Rozet: View {
@@ -48,6 +51,17 @@ struct Rozet: View {
 struct KalemSatiri: View {
     let k: Kalem
     var body: some View {
+        if let r = k.j.str("resim") {
+            HStack(spacing: 12) {
+                YetkiliResim(adres: r).frame(width: 52, height: 52).background(Color(.tertiarySystemFill)).clipShape(RoundedRectangle(cornerRadius: 8))
+                metin
+            }
+        } else {
+            metin
+        }
+    }
+
+    private var metin: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(k.baslik.isEmpty ? "—" : k.baslik).font(.body.weight(.semibold)).lineLimit(2)

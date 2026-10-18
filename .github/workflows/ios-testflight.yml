@@ -9,9 +9,9 @@ on:
   workflow_dispatch:
     inputs:
       surum:
-        description: "Sürüm numarası (ör. 1.0.0)"
+        description: "Sürüm numarası (ör. 1.1.0)"
         required: true
-        default: "1.0.0"
+        default: "1.1.0"
 jobs:
   yukle:
     runs-on: macos-15

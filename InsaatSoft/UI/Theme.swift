@@ -69,5 +69,11 @@ enum Simge {
         "upload": "square.and.arrow.up", "download": "square.and.arrow.down", "print": "printer.fill", "eye": "eye.fill",
         "image": "photo", "camera": "camera.fill", "magnifying-glass": "magnifyingglass", "filter": "line.3.horizontal.decrease.circle",
         "xmark": "xmark", "ban": "nosign", "rotate": "arrow.clockwise", "share": "square.and.arrow.up", "link": "link",
+        "copy": "doc.on.doc", "database": "cylinder.split.1x2.fill", "arrow-up-right-from-square": "arrow.up.right.square", "images": "photo.stack",
+        "table-cells-large": "square.grid.2x2.fill", "building-user": "person.crop.square", "palette": "paintpalette.fill", "user-slash": "person.fill.xmark",
+        "toggle-on": "switch.2", "share-nodes": "square.and.arrow.up", "file-export": "square.and.arrow.up.on.square", "file-csv": "tablecells",
+        "qrcode": "qrcode", "mobile-screen": "iphone", "right-from-bracket": "rectangle.portrait.and.arrow.right", "circle-check": "checkmark.circle.fill",
+        "circle-info": "info.circle.fill", "eye-slash": "eye.slash.fill", "envelope-open": "envelope.open", "bell-slash": "bell.slash.fill",
+        "broom": "trash.slash", "arrows-rotate": "arrow.triangle.2.circlepath", "floppy-disk": "externaldrive.fill", "cloud": "icloud.fill",
     ]
 }

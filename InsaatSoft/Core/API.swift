@@ -266,6 +266,59 @@ final class API {
     }
 
     func onbellegiTemizle() { resimOnbellek.removeAllObjects() }
+
+    // MARK: İmzalı indirme (dosya, CSV, e-belge XML, yedek)
+
+    /// İmzalı adresteki dosyayı geçici klasöre indirir; sunucunun verdiği dosya adıyla yerel adresini döndürür.
+    func indir(_ url: URL) async throws -> URL {
+        var r = URLRequest(url: url)
+        r.timeoutInterval = 300
+        r.setValue("*/*", forHTTPHeaderField: "Accept")
+        do {
+            let (gecici, resp) = try await session.download(for: r)
+            let h = resp as? HTTPURLResponse
+            let kod = h?.statusCode ?? 0
+            let tur = h?.value(forHTTPHeaderField: "Content-Type") ?? ""
+            if kod != 200 {
+                let d = (try? Data(contentsOf: gecici)) ?? Data()
+                let m = JSON.parse(d)?.str("msg") ?? String(decoding: d.prefix(400), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+                throw APIError(kod: "indir", msg: m.isEmpty || m.hasPrefix("<") ? "Dosya indirilemedi (HTTP \(kod))." : m, status: kod)
+            }
+            let ad = API.dosyaAdi(h?.value(forHTTPHeaderField: "Content-Disposition"), tur: tur)
+            let fm = FileManager.default
+            let klasor = fm.temporaryDirectory.appendingPathComponent("indirilen", isDirectory: true).appendingPathComponent(UUID().uuidString, isDirectory: true)
+            try fm.createDirectory(at: klasor, withIntermediateDirectories: true)
+            let hedef = klasor.appendingPathComponent(ad)
+            if fm.fileExists(atPath: hedef.path) { try? fm.removeItem(at: hedef) }
+            try fm.moveItem(at: gecici, to: hedef)
+            return hedef
+        } catch let e as APIError { throw e } catch { throw APIError.ag(error) }
+    }
+
+    /// Content-Disposition başlığından dosya adı (filename* öncelikli); yoksa içerik türüne göre
+    static func dosyaAdi(_ baslik: String?, tur: String) -> String {
+        var ad = ""
+        if let b = baslik {
+            for parca in b.components(separatedBy: ";") {
+                let p = parca.trimmingCharacters(in: .whitespaces)
+                if p.lowercased().hasPrefix("filename*=") {
+                    var v = String(p.dropFirst(10))
+                    if let i = v.range(of: "''") { v = String(v[i.upperBound...]) }
+                    if let c = v.removingPercentEncoding, !c.isEmpty { ad = c; break }
+                } else if p.lowercased().hasPrefix("filename="), ad.isEmpty {
+                    ad = String(p.dropFirst(9)).trimmingCharacters(in: CharacterSet(charactersIn: "\" "))
+                }
+            }
+        }
+        ad = ad.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: "\\", with: "-").replacingOccurrences(of: ":", with: "-")
+        if ad.isEmpty || ad.hasPrefix(".") {
+            let t = tur.lowercased()
+            let uzanti = t.contains("csv") ? "csv" : t.contains("pdf") ? "pdf" : t.contains("zip") ? "zip" : t.contains("xml") ? "xml" : t.contains("html") ? "html"
+                : t.contains("jpeg") ? "jpg" : t.contains("png") ? "png" : t.contains("gzip") ? "gz" : t.contains("sql") ? "sql" : t.contains("text") ? "txt" : "bin"
+            ad = "dosya." + uzanti
+        }
+        return ad
+    }
 }
 
 /// Yenileme isteklerini sıraya koyar: aynı anda yalnızca bir yenileme yapılır, bekleyenler aynı sonucu alır.

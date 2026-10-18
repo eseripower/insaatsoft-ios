@@ -34,8 +34,13 @@ struct MenuView: View {
                     }
                 }
             } else {
-                // Tüm alt bölümlerde arama
+                // Tüm alt bölümlerde arama; kayıtlarda (proje, müşteri, sözleşme …) genel arama
                 let q = ara.lowercased(with: Locale(identifier: "tr_TR"))
+                if ara.trimmingCharacters(in: .whitespaces).count >= 2 {
+                    NavigationLink(value: Route.ekran("ara|q=" + API.kodla(ara.trimmingCharacters(in: .whitespaces)))) {
+                        Label { Text("“\(ara)” için kayıtlarda ara") } icon: { SimgeKutusu(ikon: "magnifying-glass", renk: Tema.celik) }
+                    }
+                }
                 ForEach(bolumler) { b in
                     ForEach(b.ogeler) { o in
                         ForEach(Array(o.altlar.enumerated()), id: \.offset) { _, a in
@@ -52,6 +57,11 @@ struct MenuView: View {
         }
         .listStyle(.insetGrouped)
         .navigationTitle("Menü")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                NavigationLink(value: Route.ekran("ara")) { Image(systemName: "magnifyingglass") }.accessibilityLabel("Genel arama")
+            }
+        }
         .searchable(text: $ara, prompt: "Bölüm ara")
         .refreshable { await session.menuYukle() }
         .overlay { if session.menu.isNull { YukleniyorView().task { await session.menuYukle() } } }
